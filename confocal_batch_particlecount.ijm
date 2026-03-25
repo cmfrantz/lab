@@ -1,5 +1,4 @@
-//MP-VAT Batch Processing (Microplastics Visual Analysis Tool) v1.0
-
+//Based off of MP-VAT Batch Processing (Microplastics Visual Analysis Tool) v1.0
 //Original Implimentation J.C.Prata, V. Reis, J. Matos, J.P.da Costa, A.Duarte, T.Rocha-Santos, 2019
 //Expanded for batch processing by W. Cowger 2020
 //Edited for Frantz Lab confocal files (3-channel Olympus *.oir files) by C. Frantz 2025
@@ -8,29 +7,15 @@
 //Macro does the following:
 //1. Selects image files from an input folder
 //2. Splits channels, runs process only on the specified channel
-//3. Applies the user-specified scale
 //4. Runs an 8-bit color conversion, user-specified threshold, and denoise
 //5. Identifies Fibers, Fragments, and Particles
-//6. Exports counts, Feret's diameter, and areas to csv files
+//6. Exports counts, Feret's diameter, and areas for each particle type to a csv file
 
-
-// ====================
-// USER INPUT GUI (This only works in ImageJ, not Fiji)
-// ====================
-//#@ File (label = "Input directory", style = "directory") input
-//#@ File (label = "Output directory", style = "directory") output
-//#@ String (label = "File suffix", value = ".oir") suffix
-//#@ Float (label = "Pixel size (microns)", value = "0.994") pixscale
-//#@ Integer (label = "Total number of channels", value = "3") nchan
-//#@ Integer (label = "Channel to analyze", value = "1") vchan
-//#@ Integer (label = "Transmitted light channel", value = "3") tlchan
-//#@ Float (label = "Threshold min to use (must be > 0)", value = "12") thresh
-//#@ Boolean (label = "Apply denoising?", value=false) doDenoise
-//#@ Boolean (label = "Save QC images?") saveQC
-//
-//inputDir = input.getAbsolutePath() + File.separator;
-//outputDir = output.getAbsolutePath() + File.separator;
-
+//Inputs:
+//Directory containing *.oir image stack files from Olympus Confocal microscope
+//	Assumes that scale is saved in the native file
+//	Analysis is conducted on the channel specified in Define Variables
+//Output directory
 
 // ====================
 // DEFINE VARIABLES
@@ -38,20 +23,14 @@
 
 // --- Manual Definitions ---
 suffix = ".oir";
-pixscale = 0.994;
 nchan = 3;
 vchan = 1;
-// thresh = 252;
 doDenoise = true;
-saveQC = true;
+saveMask = true;
 
 // --- User Input ---
 inputDir = getDirectory("Choose input directory");
 outputDir = getDirectory("Choose output directory");
-//suffix = getString("File suffix", ".oir");
-//pixscale = getNumber("Pixel size (microns)", 0.994);
-//nchan = getNumber("Total channels", 3);
-//vchan = getNumber("Channel to analyze", 1);
 
 // Auto vs. manual thresholding
 threshStr = getString("Threshold (type 'auto' for automatic thresholding, or enter an integer between 0-255)","auto");
@@ -119,12 +98,14 @@ run("Set Measurements...", "area shape feret's display redirect=None decimal=3")
 // =======================
 // PARTICLE ANALYSIS FUNCTION
 // =======================
-function microplasticAnalysis(mpType, circ_min, circ_max) {
+function microplasticAnalysis(image, mpType, circ_min, circ_max) {
 	outPath =  outputDir + baseFileName + "_" + mpType + ".csv";
 
 	run("Clear Results");
 	
-	selectWindow("working");
+	selectWindow(image);
+	run("Duplicate...", "title=temp");
+	selectWindow("temp");
 	
 	// Watershed accounts for overlapping particles
 	if (mpType == "particles") {
@@ -145,16 +126,7 @@ function microplasticAnalysis(mpType, circ_min, circ_max) {
 		File.saveString("No particles detected", outPath);
 		}
 		
-	while (isOpen("Results")) {
-		selectWindow("Results");
-		run("Close");
-		}
-	
-	while (isOpen("Summary")) {
-		selectWindow("Summary");
-		run("Close");
-		}
-}
+	}
 
 
 // =======================
@@ -170,11 +142,6 @@ for (f = 0; f < filelist.length; f++) {
 	print("Processing: " + file);
 	baseFileName = replace(file, suffix, "");
 	
-	// --- Open file to create saved composite ---
-	run("Bio-Formats Importer", "open=[" + inputDir + file + "] color_mode=Composite view=Hyperstack stack_order=XYCZT");
-	saveAs("Jpeg", outputDir + baseFileName + "_composite.jpg");
-	close();
-	
 	// --- Open file for analysis --- 
 	run("Bio-Formats Importer", "open=[" + inputDir + file + "] Autoscale color_mode=Default view=Hyperstack stack_order=XYCZT");
 
@@ -182,52 +149,17 @@ for (f = 0; f < filelist.length; f++) {
 	
 	// --- Split channels --- 
 	run("Split Channels");
-
-	titles = getList("image.titles");
 	
 	// --- Run process on the specified channel (Expected channel naming: C1-filename) --- 
 	analysisCh = getChannelWindow(vchan);
 
 	if (analysisCh == "") {
+		print("Analysis channel " + vchan + "not found.")
 		close("*");
 		continue;
 	}
 	
-	
-	// --- Save tiff images of each channel ---
-	titles = getList("image.titles");
-
-	for (c = 1; c <= nchan; c++) {
-		chName = getChannelWindow(c);
-
-		if (chName != "") {
-			selectWindow(chName);
-			run("Duplicate...", "title=view_copy");
-			selectWindow("view_copy");
-			//run("Enhance Contrast...", "saturated=0.35");
-			saveAs("Jpeg", outputDir + baseFileName + "_C" + c + ".jpg");
-			close();
-		} else {
-			print("WARNING: Channel " + c + " not found for saving.");
-		}
-	}
-	
-	
 	selectWindow(analysisCh);
-	rename("working");
-
-
-    // --- Close all other windows ---
-    titles = getList("image.titles");
-    for (i = 0; i < titles.length; i++) {
-        if (titles[i] != "working" && titles[i] != "original_copy") {
-            selectWindow(titles[i]);
-            close();
-        }
-    }
-	  
-    // --- Set the scale ---
-    run("Set Scale...", "distance=1 known=" + pixscale + " pixel=1 unit=micron");
 	  
     // --- Preprocessing ---
 	run("Invert");
@@ -250,24 +182,30 @@ for (f = 0; f < filelist.length; f++) {
 	}
 	
 	// --- Save mask QC image ---
-	if (saveQC) {
+	if (saveMask) {
+		run("Duplicate...", "title=view_copy");
+		selectWindow("view_copy");
 		saveAs("Jpeg", outputDir + baseFileName + "_mask.jpg");
 	}
 	
 	// --- Define and analyze three types of shapes:  ---
 	
 	// 		Fibers (low circularity)
-	microplasticAnalysis("fibers", 0.0, 0.3);
+	microplasticAnalysis(analysisCh, "fibers", 0.0, 0.3);
 
 	//		Fragments (med circularity)
-	microplasticAnalysis("fragments", 0.3, 0.6);
+	microplasticAnalysis(analysisCh, "fragments", 0.3, 0.6);
 
 	//		Particles
-	microplasticAnalysis("fragments", 0.6, 1.0);
+	microplasticAnalysis(analysisCh, "particles", 0.6, 1.0);
 	
+	// --- Close all windows ---
+    close("*");
 	
 	print("Finished: " + file);
 
 }
 
 setBatchMode(false);
+
+print("Done with set.");
