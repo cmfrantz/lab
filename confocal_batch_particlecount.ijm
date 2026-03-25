@@ -99,9 +99,8 @@ run("Set Measurements...", "area shape feret's display redirect=None decimal=3")
 // PARTICLE ANALYSIS FUNCTION
 // =======================
 function microplasticAnalysis(image, mpType, circ_min, circ_max) {
-	outPath =  outputDir + baseFileName + "_" + mpType + ".csv";
-
-	run("Clear Results");
+	
+	start = nResults;
 	
 	selectWindow(image);
 	run("Duplicate...", "title=temp");
@@ -114,17 +113,24 @@ function microplasticAnalysis(image, mpType, circ_min, circ_max) {
 		
 	// Analyze particles
 	run("Analyze Particles...", "size=3-1000000 pixel circularity=" + circ_min + "-" + circ_max + " show=Overlay display summarize");
+	end = nResults;
+	
+	
+	// Add particle type label to new results rows
+	for (r = start; r < end; r++) {
+		setResult("Type", r, mpType);
+	}
 	
 	// Check results
 	if (nResults > 0) {
-		selectWindow("Results");
 		print(mpType + ": " + nResults);
-		saveAs("Results", outPath);
-		close();
 	} else {
 		print(mpType + ": 0");
-		File.saveString("No particles detected", outPath);
 		}
+		
+	// Close the temp image
+	selectWindow("temp");
+	close();
 		
 	}
 
@@ -189,6 +195,7 @@ for (f = 0; f < filelist.length; f++) {
 	}
 	
 	// --- Define and analyze three types of shapes:  ---
+	run("Clear Results");
 	
 	// 		Fibers (low circularity)
 	microplasticAnalysis(analysisCh, "fibers", 0.0, 0.3);
@@ -198,6 +205,13 @@ for (f = 0; f < filelist.length; f++) {
 
 	//		Particles
 	microplasticAnalysis(analysisCh, "particles", 0.6, 1.0);
+	
+	// --- Save the results ---
+	for (r = 0; r < nResults; r++) {
+		setResult("Image", r, baseFileName);
+	}
+	outPath =  outputDir + baseFileName + ".csv";
+	saveAs("Results", outPath);
 	
 	// --- Close all windows ---
     close("*");
